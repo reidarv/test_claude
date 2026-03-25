@@ -169,11 +169,12 @@
 </footer>
 
 <script>
+const CSV_LOCAL  = 'data/Tildelinger.csv';
 const CSV_DIRECT = 'https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv';
 const CSV_PROXIES = [
+  CSV_LOCAL,
   'https://corsproxy.io/?' + encodeURIComponent(CSV_DIRECT),
   'https://api.allorigins.win/raw?url=' + encodeURIComponent(CSV_DIRECT),
-  'https://proxy.cors.sh/' + CSV_DIRECT,
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -233,12 +234,12 @@ function parseSuccess(results) {
     `${allRows.length.toLocaleString('no-NO')} rader lastet`;
 }
 
-function loadData(proxyIndex = -1) {
+function loadData(proxyIndex = 0) {
   document.getElementById('loading').classList.remove('hidden');
   document.getElementById('error-state').classList.add('hidden');
   document.getElementById('main-content').classList.add('hidden');
 
-  const url = proxyIndex === -1 ? CSV_DIRECT : CSV_PROXIES[proxyIndex];
+  const url = proxyIndex === 0 ? CSV_LOCAL : CSV_PROXIES[proxyIndex];
 
   Papa.parse(url, {
     download: true,
@@ -250,7 +251,7 @@ function loadData(proxyIndex = -1) {
       if (next < CSV_PROXIES.length) {
         loadData(next);
       } else {
-        showError('Kunne ikke laste data. Prøv å åpne siden i en annen nettleser, eller last ned CSV-filen manuelt.');
+        showError('Kunne ikke laste data. Kjør GitHub Actions-workflow "Update Tildelinger data" manuelt for å laste inn CSV-filen.');
       }
     }
   });
