@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tildelinger Dashboard – Forskningsrådet</title>
+  <title>Tildelinger Dashboard – Innovasjon Norge</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -32,7 +32,7 @@
   <div class="max-w-screen-xl mx-auto px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
     <div>
       <h1 class="text-2xl font-bold tracking-tight">Tildelingsdashboard</h1>
-      <p class="text-blue-200 text-sm mt-0.5">Norges forskningsråd – Offentlige tildelingsdata</p>
+      <p class="text-blue-200 text-sm mt-0.5">Innovasjon Norge – Offentlige tildelingsdata</p>
     </div>
     <div id="data-info" class="text-blue-200 text-sm text-right"></div>
   </div>
@@ -41,7 +41,7 @@
 <!-- Loading state -->
 <div id="loading" class="flex flex-col items-center justify-center py-32 gap-4">
   <div class="spinner"></div>
-  <p class="text-gray-500 text-sm">Laster inn data fra Forskningsrådet…</p>
+  <p class="text-gray-500 text-sm">Laster inn data fra Innovasjon Norge…</p>
 </div>
 
 <!-- Error state -->
@@ -165,11 +165,12 @@
 </main>
 
 <footer class="text-center text-xs text-gray-400 py-6">
-  Data: <a href="https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv" class="underline hover:text-blue-500" target="_blank">Norges forskningsråd – Tildelingsrapport</a>
+  Data: <a href="https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv" class="underline hover:text-blue-500" target="_blank">Innovasjon Norge – Tildelingsrapport</a>
 </footer>
 
 <script>
-const CSV_URL = 'https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv';
+const CSV_DIRECT = 'https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv';
+const CSV_PROXY  = 'https://corsproxy.io/?' + encodeURIComponent(CSV_DIRECT);
 
 // ── State ─────────────────────────────────────────────────────────────────
 let allRows = [];
@@ -212,36 +213,41 @@ function detectCols(headerRow) {
 }
 
 // ── Data loading ──────────────────────────────────────────────────────────
-function loadData() {
+function parseSuccess(results) {
+  if (!results.data || results.data.length < 2) {
+    showError('Ingen data funnet i CSV-filen.');
+    return;
+  }
+  headers = results.data[0];
+  allRows = results.data.slice(1);
+  cols = detectCols(headers);
+  populateFilters();
+  applyFilters();
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('main-content').classList.remove('hidden');
+  document.getElementById('data-info').textContent =
+    `${allRows.length.toLocaleString('no-NO')} rader lastet`;
+}
+
+function loadData(useProxy = false) {
   document.getElementById('loading').classList.remove('hidden');
   document.getElementById('error-state').classList.add('hidden');
   document.getElementById('main-content').classList.add('hidden');
 
-  Papa.parse(CSV_URL, {
+  const url = useProxy ? CSV_PROXY : CSV_DIRECT;
+
+  Papa.parse(url, {
     download: true,
     header: false,
     skipEmptyLines: true,
-    complete(results) {
-      if (!results.data || results.data.length < 2) {
-        showError('Ingen data funnet i CSV-filen.');
-        return;
-      }
-      headers = results.data[0];
-      allRows = results.data.slice(1);
-      cols = detectCols(headers);
-
-      populateFilters();
-      applyFilters();
-
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('main-content').classList.remove('hidden');
-
-      const lastMod = results.meta?.lastModified || '';
-      document.getElementById('data-info').textContent =
-        `${allRows.length.toLocaleString('no-NO')} rader lastet`;
-    },
+    complete: parseSuccess,
     error(err) {
-      showError(err.message || 'Ukjent feil ved lasting av data.');
+      if (!useProxy) {
+        // Direct fetch failed (likely CORS), retry via proxy
+        loadData(true);
+      } else {
+        showError('Kunne ikke laste data. Sjekk internettforbindelsen din.');
+      }
     }
   });
 }
