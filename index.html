@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tildelinger Dashboard – Forskningsrådet</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; }
+    .chart-container { position: relative; height: 300px; }
+    .spinner {
+      border: 4px solid #e5e7eb;
+      border-top: 4px solid #3b82f6;
+      border-radius: 50%;
+      width: 48px; height: 48px;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    th { cursor: pointer; user-select: none; }
+    th:hover { background-color: #dbeafe; }
+    tr:hover td { background-color: #f0f9ff; }
+    .sort-icon { display: inline-block; margin-left: 4px; opacity: 0.4; }
+    .sort-icon.active { opacity: 1; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen">
+
+<!-- Header -->
+<header class="bg-blue-700 text-white shadow-lg">
+  <div class="max-w-screen-xl mx-auto px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">Tildelingsdashboard</h1>
+      <p class="text-blue-200 text-sm mt-0.5">Norges forskningsråd – Offentlige tildelingsdata</p>
+    </div>
+    <div id="data-info" class="text-blue-200 text-sm text-right"></div>
+  </div>
+</header>
+
+<!-- Loading state -->
+<div id="loading" class="flex flex-col items-center justify-center py-32 gap-4">
+  <div class="spinner"></div>
+  <p class="text-gray-500 text-sm">Laster inn data fra Forskningsrådet…</p>
+</div>
+
+<!-- Error state -->
+<div id="error-state" class="hidden max-w-xl mx-auto mt-20 bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+  <div class="text-4xl mb-3">⚠️</div>
+  <h2 class="text-red-700 font-semibold text-lg mb-1">Kunne ikke laste data</h2>
+  <p class="text-red-500 text-sm" id="error-message"></p>
+  <button onclick="loadData()" class="mt-4 bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700">Prøv igjen</button>
+</div>
+
+<!-- Main content -->
+<main id="main-content" class="hidden max-w-screen-xl mx-auto px-6 py-8 space-y-8">
+
+  <!-- Filters bar -->
+  <section class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap gap-4 items-end">
+    <div id="filter-year" class="flex flex-col gap-1">
+      <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">År</label>
+      <select id="sel-year" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <option value="">Alle år</option>
+      </select>
+    </div>
+    <div id="filter-sector" class="flex flex-col gap-1">
+      <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sektor</label>
+      <select id="sel-sector" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <option value="">Alle sektorer</option>
+      </select>
+    </div>
+    <div id="filter-dept" class="flex flex-col gap-1">
+      <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Departement</label>
+      <select id="sel-dept" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <option value="">Alle departementer</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-1 flex-1 min-w-[180px]">
+      <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Søk</label>
+      <input id="search-input" type="text" placeholder="Søk i tittel eller organisasjon…"
+        class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 w-full" />
+    </div>
+    <button onclick="resetFilters()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium">Nullstill</button>
+  </section>
+
+  <!-- KPI cards -->
+  <section class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Totalt tildelt</p>
+      <p id="kpi-total" class="text-2xl font-bold text-blue-600 mt-1">–</p>
+      <p class="text-xs text-gray-400 mt-0.5">mill. kroner</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Antall prosjekter</p>
+      <p id="kpi-count" class="text-2xl font-bold text-emerald-600 mt-1">–</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Snitt per prosjekt</p>
+      <p id="kpi-avg" class="text-2xl font-bold text-violet-600 mt-1">–</p>
+      <p class="text-xs text-gray-400 mt-0.5">mill. kroner</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Unike org.</p>
+      <p id="kpi-orgs" class="text-2xl font-bold text-amber-500 mt-1">–</p>
+    </div>
+  </section>
+
+  <!-- Charts row 1 -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Tildelinger per år</h2>
+      <div class="chart-container"><canvas id="chart-year"></canvas></div>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Fordeling per sektor</h2>
+      <div class="chart-container"><canvas id="chart-sector"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Charts row 2 -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Top 10 prosjektansvarlige</h2>
+      <div class="chart-container"><canvas id="chart-org"></canvas></div>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Tildelinger per departement</h2>
+      <div class="chart-container"><canvas id="chart-dept"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Charts row 3 -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div id="chart-fagomrade-wrap" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hidden">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Fagområde</h2>
+      <div class="chart-container"><canvas id="chart-fagomrade"></canvas></div>
+    </div>
+    <div id="chart-virkemiddel-wrap" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hidden">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Virkemiddel</h2>
+      <div class="chart-container"><canvas id="chart-virkemiddel"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Data table -->
+  <section class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Prosjekter</h2>
+      <span id="table-count" class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full"></span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm" id="data-table">
+        <thead id="table-head" class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+          <tr id="header-row"></tr>
+        </thead>
+        <tbody id="table-body" class="divide-y divide-gray-100 text-gray-700"></tbody>
+      </table>
+    </div>
+    <div class="px-6 py-3 border-t border-gray-100 flex items-center justify-between">
+      <button id="prev-btn" onclick="changePage(-1)" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm disabled:opacity-30">← Forrige</button>
+      <span id="page-info" class="text-xs text-gray-400"></span>
+      <button id="next-btn" onclick="changePage(1)" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm disabled:opacity-30">Neste →</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="text-center text-xs text-gray-400 py-6">
+  Data: <a href="https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv" class="underline hover:text-blue-500" target="_blank">Norges forskningsråd – Tildelingsrapport</a>
+</footer>
+
+<script>
+const CSV_URL = 'https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv';
+
+// ── State ─────────────────────────────────────────────────────────────────
+let allRows = [];
+let filteredRows = [];
+let cols = {};          // detected column indices
+let headers = [];
+let charts = {};
+let sortCol = -1;
+let sortAsc = true;
+let page = 0;
+const PAGE_SIZE = 50;
+
+// ── Column detection ──────────────────────────────────────────────────────
+const COL_PATTERNS = {
+  id:          [/prosjektnr/i, /prosjekt.?id/i, /projec.?nr/i],
+  title:       [/tittel/i, /title/i, /prosjekttittel/i],
+  org:         [/prosjektansvarlig/i, /institusjon/i, /organisasjon/i, /responsible/i],
+  sector:      [/sektor/i, /sector/i],
+  virkemiddel: [/virkemiddel/i, /instrument/i, /aktivitet/i],
+  dept:        [/departement/i, /department/i],
+  fagomrade:   [/fagomr/i, /research.?area/i, /fag/i],
+  amount:      [/tildel/i, /bel[øo]p/i, /amount/i, /mill/i, /kr$/i, /nok/i],
+  year:        [/fra.?[åa]r/i, /start.?[åa]r/i, /startaar/i, /fra_ar/i, /year/i, /[åa]r$/i, /[åa]rstall/i],
+  yearEnd:     [/til.?[åa]r/i, /slutt.?[åa]r/i, /sluttaar/i, /til_ar/i],
+  county:      [/fylke/i, /county/i, /region/i],
+  country:     [/land/i, /country/i],
+};
+
+function detectCols(headerRow) {
+  const result = {};
+  for (const [key, patterns] of Object.entries(COL_PATTERNS)) {
+    for (let i = 0; i < headerRow.length; i++) {
+      const h = headerRow[i];
+      if (patterns.some(p => p.test(h))) {
+        if (result[key] === undefined) result[key] = i;
+      }
+    }
+  }
+  return result;
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────
+function loadData() {
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('error-state').classList.add('hidden');
+  document.getElementById('main-content').classList.add('hidden');
+
+  Papa.parse(CSV_URL, {
+    download: true,
+    header: false,
+    skipEmptyLines: true,
+    complete(results) {
+      if (!results.data || results.data.length < 2) {
+        showError('Ingen data funnet i CSV-filen.');
+        return;
+      }
+      headers = results.data[0];
+      allRows = results.data.slice(1);
+      cols = detectCols(headers);
+
+      populateFilters();
+      applyFilters();
+
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('main-content').classList.remove('hidden');
+
+      const lastMod = results.meta?.lastModified || '';
+      document.getElementById('data-info').textContent =
+        `${allRows.length.toLocaleString('no-NO')} rader lastet`;
+    },
+    error(err) {
+      showError(err.message || 'Ukjent feil ved lasting av data.');
+    }
+  });
+}
+
+function showError(msg) {
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('error-state').classList.remove('hidden');
+  document.getElementById('error-message').textContent = msg;
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────
+function getVal(row, key) {
+  const idx = cols[key];
+  return idx !== undefined ? (row[idx] || '').toString().trim() : '';
+}
+
+function getNum(row, key) {
+  const raw = getVal(row, key).replace(/\s/g, '').replace(',', '.');
+  const n = parseFloat(raw);
+  return isNaN(n) ? 0 : n;
+}
+
+function populateFilters() {
+  fillSelect('sel-year', cols.year !== undefined
+    ? [...new Set(allRows.map(r => getVal(r, 'year')).filter(Boolean))].sort()
+    : []);
+
+  fillSelect('sel-sector', cols.sector !== undefined
+    ? [...new Set(allRows.map(r => getVal(r, 'sector')).filter(Boolean))].sort()
+    : []);
+
+  fillSelect('sel-dept', cols.dept !== undefined
+    ? [...new Set(allRows.map(r => getVal(r, 'dept')).filter(Boolean))].sort()
+    : []);
+}
+
+function fillSelect(id, values) {
+  const sel = document.getElementById(id);
+  const existing = sel.options[0];
+  sel.innerHTML = '';
+  sel.appendChild(existing);
+  values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    sel.appendChild(opt);
+  });
+  sel.onchange = applyFilters;
+}
+
+function resetFilters() {
+  document.getElementById('sel-year').value = '';
+  document.getElementById('sel-sector').value = '';
+  document.getElementById('sel-dept').value = '';
+  document.getElementById('search-input').value = '';
+  applyFilters();
+}
+
+function applyFilters() {
+  const year   = document.getElementById('sel-year').value;
+  const sector = document.getElementById('sel-sector').value;
+  const dept   = document.getElementById('sel-dept').value;
+  const search = document.getElementById('search-input').value.toLowerCase();
+
+  filteredRows = allRows.filter(row => {
+    if (year   && getVal(row, 'year')   !== year)   return false;
+    if (sector && getVal(row, 'sector') !== sector) return false;
+    if (dept   && getVal(row, 'dept')   !== dept)   return false;
+    if (search) {
+      const title = getVal(row, 'title').toLowerCase();
+      const org   = getVal(row, 'org').toLowerCase();
+      if (!title.includes(search) && !org.includes(search)) return false;
+    }
+    return true;
+  });
+
+  page = 0;
+  updateKPIs();
+  renderCharts();
+  renderTable();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('search-input').addEventListener('input', applyFilters);
+});
+
+// ── KPIs ──────────────────────────────────────────────────────────────────
+function fmt(n) { return n.toLocaleString('no-NO', { maximumFractionDigits: 1 }); }
+
+function updateKPIs() {
+  const count = filteredRows.length;
+  let total = 0;
+  const orgs = new Set();
+
+  filteredRows.forEach(r => {
+    total += getNum(r, 'amount');
+    const o = getVal(r, 'org');
+    if (o) orgs.add(o);
+  });
+
+  document.getElementById('kpi-count').textContent = count.toLocaleString('no-NO');
+  document.getElementById('kpi-total').textContent = fmt(total);
+  document.getElementById('kpi-avg').textContent = count > 0 ? fmt(total / count) : '–';
+  document.getElementById('kpi-orgs').textContent = orgs.size.toLocaleString('no-NO');
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────
+const PALETTE = [
+  '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+  '#06b6d4','#84cc16','#f97316','#ec4899','#6366f1',
+  '#14b8a6','#eab308','#a855f7','#64748b','#0ea5e9'
+];
+
+function groupBy(rows, key, valueKey) {
+  const map = {};
+  rows.forEach(r => {
+    const k = getVal(r, key) || '(ukjent)';
+    map[k] = (map[k] || 0) + (valueKey ? getNum(r, valueKey) : 1);
+  });
+  return map;
+}
+
+function topN(map, n, sortByVal = true) {
+  let entries = Object.entries(map);
+  if (sortByVal) entries.sort((a, b) => b[1] - a[1]);
+  else entries.sort((a, b) => a[0].localeCompare(b[0]));
+  return entries.slice(0, n);
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function makeBar(canvasId, labels, data, label, horizontal = false) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label, data, backgroundColor: PALETTE, borderRadius: 4 }]
+    },
+    options: {
+      indexAxis: horizontal ? 'y' : 'x',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } },
+        y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function makeDoughnut(canvasId, labels, data) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  charts[canvasId] = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: PALETTE, borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { font: { size: 11 }, boxWidth: 12, padding: 10 }
+        }
+      }
+    }
+  });
+}
+
+function renderCharts() {
+  // Per year
+  if (cols.year !== undefined) {
+    const byYear = groupBy(filteredRows, 'year', cols.amount !== undefined ? 'amount' : null);
+    const sorted = topN(byYear, 40, false).sort((a, b) => a[0].localeCompare(b[0]));
+    makeBar('chart-year', sorted.map(e => e[0]), sorted.map(e => e[1]),
+      cols.amount !== undefined ? 'Tildelt (MNOK)' : 'Antall prosjekter');
+  }
+
+  // Per sector
+  if (cols.sector !== undefined) {
+    const bySector = groupBy(filteredRows, 'sector', cols.amount !== undefined ? 'amount' : null);
+    const top = topN(bySector, 10);
+    makeDoughnut('chart-sector', top.map(e => e[0]), top.map(e => e[1]));
+  }
+
+  // Top orgs
+  if (cols.org !== undefined) {
+    const byOrg = groupBy(filteredRows, 'org', cols.amount !== undefined ? 'amount' : null);
+    const top = topN(byOrg, 10);
+    makeBar('chart-org', top.map(e => e[0]), top.map(e => e[1]),
+      cols.amount !== undefined ? 'Tildelt (MNOK)' : 'Antall prosjekter', true);
+  }
+
+  // Per dept
+  if (cols.dept !== undefined) {
+    const byDept = groupBy(filteredRows, 'dept', cols.amount !== undefined ? 'amount' : null);
+    const top = topN(byDept, 12);
+    makeBar('chart-dept', top.map(e => e[0]), top.map(e => e[1]),
+      cols.amount !== undefined ? 'Tildelt (MNOK)' : 'Antall prosjekter', true);
+  }
+
+  // Fagområde
+  if (cols.fagomrade !== undefined) {
+    document.getElementById('chart-fagomrade-wrap').classList.remove('hidden');
+    const byFag = groupBy(filteredRows, 'fagomrade', cols.amount !== undefined ? 'amount' : null);
+    const top = topN(byFag, 10);
+    makeDoughnut('chart-fagomrade', top.map(e => e[0]), top.map(e => e[1]));
+  }
+
+  // Virkemiddel
+  if (cols.virkemiddel !== undefined) {
+    document.getElementById('chart-virkemiddel-wrap').classList.remove('hidden');
+    const byV = groupBy(filteredRows, 'virkemiddel', cols.amount !== undefined ? 'amount' : null);
+    const top = topN(byV, 10);
+    makeDoughnut('chart-virkemiddel', top.map(e => e[0]), top.map(e => e[1]));
+  }
+}
+
+// ── Table ─────────────────────────────────────────────────────────────────
+// Show only "interesting" columns (hide very long text or duplicates if many cols)
+function getDisplayCols() {
+  // Priority: id, year, title, org, sector, dept, amount, then others up to 8
+  const priority = ['id','year','title','org','sector','dept','virkemiddel','fagomrade','amount'];
+  const shown = [];
+  const usedIdx = new Set();
+
+  priority.forEach(key => {
+    if (cols[key] !== undefined && !usedIdx.has(cols[key])) {
+      shown.push({ key, idx: cols[key], label: headers[cols[key]] });
+      usedIdx.add(cols[key]);
+    }
+  });
+
+  // Fill remaining up to 10 cols from headers
+  if (shown.length < 10) {
+    headers.forEach((h, i) => {
+      if (!usedIdx.has(i) && shown.length < 10) {
+        shown.push({ key: null, idx: i, label: h });
+        usedIdx.add(i);
+      }
+    });
+  }
+
+  return shown;
+}
+
+let displayCols = [];
+
+function renderTable() {
+  displayCols = getDisplayCols();
+  const head = document.getElementById('header-row');
+  head.innerHTML = '';
+  displayCols.forEach((c, ci) => {
+    const th = document.createElement('th');
+    th.className = 'px-4 py-3 text-left whitespace-nowrap text-xs font-semibold text-gray-500 uppercase tracking-wide';
+    const icon = document.createElement('span');
+    icon.className = 'sort-icon' + (sortCol === ci ? ' active' : '');
+    icon.textContent = sortCol === ci ? (sortAsc ? ' ▲' : ' ▼') : ' ↕';
+    th.textContent = c.label;
+    th.appendChild(icon);
+    th.onclick = () => sortTable(ci);
+    head.appendChild(th);
+  });
+  renderTablePage();
+}
+
+function sortTable(ci) {
+  if (sortCol === ci) sortAsc = !sortAsc;
+  else { sortCol = ci; sortAsc = true; }
+  const idx = displayCols[ci].idx;
+  filteredRows.sort((a, b) => {
+    const va = (a[idx] || '').toString();
+    const vb = (b[idx] || '').toString();
+    const na = parseFloat(va.replace(',', '.')), nb = parseFloat(vb.replace(',', '.'));
+    let cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb, 'no');
+    return sortAsc ? cmp : -cmp;
+  });
+  page = 0;
+  renderTable();
+}
+
+function renderTablePage() {
+  const start = page * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, filteredRows.length);
+  const body = document.getElementById('table-body');
+  body.innerHTML = '';
+
+  const slice = filteredRows.slice(start, end);
+  slice.forEach(row => {
+    const tr = document.createElement('tr');
+    displayCols.forEach(c => {
+      const td = document.createElement('td');
+      td.className = 'px-4 py-2.5 max-w-xs truncate';
+      const val = (row[c.idx] || '').toString().trim();
+      td.textContent = val;
+      td.title = val;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+
+  const totalPages = Math.ceil(filteredRows.length / PAGE_SIZE);
+  document.getElementById('page-info').textContent =
+    `Side ${page + 1} av ${totalPages} (${filteredRows.length.toLocaleString('no-NO')} rader)`;
+  document.getElementById('table-count').textContent =
+    `${filteredRows.length.toLocaleString('no-NO')} prosjekter`;
+  document.getElementById('prev-btn').disabled = page === 0;
+  document.getElementById('next-btn').disabled = page >= totalPages - 1;
+}
+
+function changePage(dir) {
+  const totalPages = Math.ceil(filteredRows.length / PAGE_SIZE);
+  page = Math.max(0, Math.min(page + dir, totalPages - 1));
+  renderTablePage();
+  document.getElementById('data-table').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>
