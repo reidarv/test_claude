@@ -170,7 +170,11 @@
 
 <script>
 const CSV_DIRECT = 'https://indatapublic.blob.core.windows.net/tildelingsrapport/Tildelinger.csv';
-const CSV_PROXY  = 'https://corsproxy.io/?' + encodeURIComponent(CSV_DIRECT);
+const CSV_PROXIES = [
+  'https://corsproxy.io/?' + encodeURIComponent(CSV_DIRECT),
+  'https://api.allorigins.win/raw?url=' + encodeURIComponent(CSV_DIRECT),
+  'https://proxy.cors.sh/' + CSV_DIRECT,
+];
 
 // ── State ─────────────────────────────────────────────────────────────────
 let allRows = [];
@@ -229,24 +233,24 @@ function parseSuccess(results) {
     `${allRows.length.toLocaleString('no-NO')} rader lastet`;
 }
 
-function loadData(useProxy = false) {
+function loadData(proxyIndex = -1) {
   document.getElementById('loading').classList.remove('hidden');
   document.getElementById('error-state').classList.add('hidden');
   document.getElementById('main-content').classList.add('hidden');
 
-  const url = useProxy ? CSV_PROXY : CSV_DIRECT;
+  const url = proxyIndex === -1 ? CSV_DIRECT : CSV_PROXIES[proxyIndex];
 
   Papa.parse(url, {
     download: true,
     header: false,
     skipEmptyLines: true,
     complete: parseSuccess,
-    error(err) {
-      if (!useProxy) {
-        // Direct fetch failed (likely CORS), retry via proxy
-        loadData(true);
+    error() {
+      const next = proxyIndex + 1;
+      if (next < CSV_PROXIES.length) {
+        loadData(next);
       } else {
-        showError('Kunne ikke laste data. Sjekk internettforbindelsen din.');
+        showError('Kunne ikke laste data. Prøv å åpne siden i en annen nettleser, eller last ned CSV-filen manuelt.');
       }
     }
   });
